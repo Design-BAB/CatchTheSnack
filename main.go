@@ -16,8 +16,8 @@ type Actor struct {
     Flip bool
     Speed float32
 }
-func newActor(texture rl.Texture2D, x, y, width, height float32) *Actor {
-  return &Actor{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: width, Height: height}, Flip: false, Speed: 7.0}
+func newActor(texture rl.Texture2D, x, y float32) *Actor {
+  return &Actor{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: float32(texture.Width), Height: float32(texture.Height)}, Flip: false, Speed: 7.0}
 }
 
 
@@ -27,8 +27,8 @@ type Object struct {
     //this is the collision box``
     rl.Rectangle // This gives Actor all the fields of rl.Rectangle (X, Y, Width, Height)
 }
-func newObject(texture rl.Texture2D, x, y, width, height float32) *Object {
-  return &Object{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: width, Height: height}}
+func newObject(texture rl.Texture2D, x, y float32) *Object {
+  return &Object{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: float32(texture.Width), Height: float32(texture.Height)}}
 }
 func place(c *Object, size int)  {
   c.X = float32(rand.IntN(size - 20))
@@ -51,8 +51,8 @@ func howMuchTimeIsLeft(startTime time.Time, gameDuration time.Duration) string {
 
 func main() {
   //not in the book but, I need to set up the window and fps
-  var size int32 = 800
-  myGreen := rl.NewColor(143, 232, 102, 255)
+  var size int32 = 900
+  //myGreen := rl.NewColor(143, 232, 102, 255)
   rl.InitWindow(size, size, "Catch The Snack!")
   defer rl.CloseWindow()
   rl.SetTargetFPS(60)
@@ -67,20 +67,25 @@ func main() {
   score := 0
   gameIsOver := false
 
+  //load Background
+  backgroundTexture := rl.LoadTexture("images/background.png")
+  defer rl.UnloadTexture(backgroundTexture)
+
   //load fox
   foxTexture := rl.LoadTexture("images/fox.png")
   defer rl.UnloadTexture(foxTexture)
-  fox := newActor(foxTexture, 100.0, float32(size) - 100, float32(foxTexture.Width), float32(foxTexture.Height))
-  //laod coin
-  coinTexture := rl.LoadTexture("images/coin.png")
-  defer rl.UnloadTexture(coinTexture)
-  coin := newObject(coinTexture, 200.0, 50.0, float32(coinTexture.Width), float32(coinTexture.Height))
+  fox := newActor(foxTexture, 100.0, 700.0)
+  //laod fruit
+  fruitTexture := rl.LoadTexture("images/apple.png")
+  defer rl.UnloadTexture(fruitTexture)
+  fruit := newObject(fruitTexture, 200.0, 50.0)
 
     
   for !rl.WindowShouldClose() {
     // Drawing What should be on screen
     rl.BeginDrawing()
-    rl.ClearBackground(myGreen)
+    rl.ClearBackground(rl.RayWhite)
+    rl.DrawTexture(backgroundTexture, 0, 0, rl.White)
     //this line is like fox.draw()
     if rl.IsKeyDown(rl.KeyRight) {
       fox.X = fox.X + fox.Speed
@@ -99,7 +104,7 @@ func main() {
     }
     //this will act as gravity
     fox.Y = fox.Y + 3.0
-    coin.Y = coin.Y + 7.0
+    fruit.Y = fruit.Y + 7.0
     //collisions with the window
     fox.X = rl.Clamp(fox.X, 0.0, float32(size) - fox.Width)
     fox.Y = rl.Clamp(fox.Y, 0.0, float32(size) - fox.Height)
@@ -120,16 +125,16 @@ func main() {
       screenText = "Game over"
       gameIsOver = true
     } else {
-      if rl.CheckCollisionRecs(fox.Rectangle, coin.Rectangle){
+      if rl.CheckCollisionRecs(fox.Rectangle, fruit.Rectangle){
         score++
-        place(coin, int(size))
+        place(fruit, int(size))
       }
-      if coin.Y > float32(size) {
-        place(coin, int(size))
+      if fruit.Y > float32(size) {
+        place(fruit, int(size))
       }
-      rl.DrawTexture(coin.Texture, int32(coin.X), int32(coin.Y), rl.White)
+      rl.DrawTexture(fruit.Texture, int32(fruit.X), int32(fruit.Y), rl.White)
   }
-    //place(coin, int(size))
+    //place(fruit, int(size))
     //On screen, draw text
     rl.DrawText("Your score is " + strconv.Itoa(score), 20, 20, 18, rl.DarkGray)
     if gameIsOver == false {
