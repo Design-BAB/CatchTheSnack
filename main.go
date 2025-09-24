@@ -30,9 +30,11 @@ type Object struct {
 func newObject(texture rl.Texture2D, x, y float32) *Object {
   return &Object{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: float32(texture.Width), Height: float32(texture.Height)}}
 }
-func place(c *Object, size int)  {
-  c.X = float32(rand.IntN(size - 20))
-  c.Y = 2.0
+func place(food *Object, size int, textures *[2]rl.Texture2D)  {
+  food.Texture = textures[rand.IntN(2)]
+  food.X = float32(rand.IntN(size - 100))
+  food.X = food.X + 50
+  food.Y = float32(rand.IntN(20)) - 18.0
 }
 
 
@@ -40,7 +42,6 @@ func timeIsUp(startTime time.Time, gameDuration time.Duration) bool {
   elapsed := time.Since(startTime)
   return elapsed >= gameDuration
 }
-
 func howMuchTimeIsLeft(startTime time.Time, gameDuration time.Duration) string {
   timeDisplay := int(gameDuration.Seconds()) - int(time.Since(startTime).Seconds())
   if timeDisplay < 0 {
@@ -50,9 +51,7 @@ func howMuchTimeIsLeft(startTime time.Time, gameDuration time.Duration) string {
 }
 
 func main() {
-  //not in the book but, I need to set up the window and fps
   var size int32 = 900
-  //myGreen := rl.NewColor(143, 232, 102, 255)
   rl.InitWindow(size, size, "Catch The Snack!")
   defer rl.CloseWindow()
   rl.SetTargetFPS(60)
@@ -62,7 +61,6 @@ func main() {
 
 
 
-  //at this point i am following the book as close as i can
   //variables
   score := 0
   gameIsOver := false
@@ -75,10 +73,15 @@ func main() {
   foxTexture := rl.LoadTexture("images/fox.png")
   defer rl.UnloadTexture(foxTexture)
   fox := newActor(foxTexture, 100.0, 700.0)
-  //laod fruit
-  fruitTexture := rl.LoadTexture("images/apple.png")
-  defer rl.UnloadTexture(fruitTexture)
-  fruit := newObject(fruitTexture, 200.0, 50.0)
+  //NOTE TO MYSELF: I already turned it into an array and added an orange.
+  //Now you gotta do is fix the gameplay and randomize the fruits given.
+  //laod fruits
+  var snackTextures [2]rl.Texture2D
+  snackTextures[0] = rl.LoadTexture("images/apple.png")
+  defer rl.UnloadTexture(snackTextures[0])
+  snackTextures[1] = rl.LoadTexture("images/orange.png")
+  defer rl.UnloadTexture(snackTextures[1])
+  snack := newObject(snackTextures[0], 200.0, 5.0)
 
     
   for !rl.WindowShouldClose() {
@@ -104,37 +107,37 @@ func main() {
     }
     //this will act as gravity
     fox.Y = fox.Y + 3.0
-    fruit.Y = fruit.Y + 7.0
+    snack.Y = snack.Y + 7.0
     //collisions with the window
     fox.X = rl.Clamp(fox.X, 0.0, float32(size) - fox.Width)
     fox.Y = rl.Clamp(fox.Y, 0.0, float32(size) - fox.Height)
-   
+    //flipping logic
     src := rl.NewRectangle(0, 0, float32(fox.Texture.Width), float32(fox.Texture.Height))
     dst := rl.NewRectangle(fox.X, fox.Y, float32(fox.Texture.Width), float32(fox.Texture.Height))
     origin := rl.NewVector2(0, 0)
-
     if fox.Flip {
       // Flip horizontally by making source width negative
       src.Width = -src.Width
       // Shift the source rect start so it doesn't disappear
       src.X = float32(fox.Texture.Width)
     }
-
     rl.DrawTexturePro(fox.Texture, src, dst, origin, 0, rl.White) //DrawTexturePro(texture Texture2D, sourceRec, destRec Rectangle, origin Vector2, rotation float32, tint color.RGBA)
+    
+    //game Logic
     if timeIsUp(startTime, gameDuration) == true {
       screenText = "Game over"
       gameIsOver = true
     } else {
-      if rl.CheckCollisionRecs(fox.Rectangle, fruit.Rectangle){
+      if rl.CheckCollisionRecs(fox.Rectangle, snack.Rectangle){
         score++
-        place(fruit, int(size))
+        place(snack, int(size), &snackTextures)
       }
-      if fruit.Y > float32(size) {
-        place(fruit, int(size))
+      if snack.Y > float32(size) {
+        place(snack, int(size), &snackTextures)
       }
-      rl.DrawTexture(fruit.Texture, int32(fruit.X), int32(fruit.Y), rl.White)
+      rl.DrawTexture(snack.Texture, int32(snack.X), int32(snack.Y), rl.White)
   }
-    //place(fruit, int(size))
+
     //On screen, draw text
     rl.DrawText("Your score is " + strconv.Itoa(score), 20, 20, 18, rl.DarkGray)
     if gameIsOver == false {
