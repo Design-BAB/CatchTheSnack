@@ -6,16 +6,32 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
+	"log"
 	"math/rand/v2"
 	"strconv"
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 const (
 	Size = 900
 )
+
+type GameState struct {
+	Score         int
+	IsOver        bool
+	HighScore     []*Scoreboard
+	ScoreRecorded bool
+}
+
+func newGame() *GameState {
+	initialScores := []*Scoreboard{}
+	return &GameState{HighScore: initialScores}
+}
 
 // Actor now embeds rl.Rectangle for position and size data.
 type Actor struct {
@@ -34,12 +50,82 @@ func newActor(texture rl.Texture2D, x, y float32) *Actor {
 type Object struct {
 	Texture rl.Texture2D
 	//this is the collision box``
-	rl.Rectangle // This gives object all the fields of rl.Rectangle (X, Y, Width, Height)
-	Weight       int
+	rl.Rectangle  // This gives object all the fields of rl.Rectangle (X, Y, Width, Height)
+	Weight        int
+	LastCatchTime time.Time
 }
 
 func newObject(texture rl.Texture2D, x, y float32, weight int) *Object {
-	return &Object{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: float32(texture.Width), Height: float32(texture.Height)}, Weight: weight}
+	startTimeNow := time.Now()
+	return &Object{Texture: texture, Rectangle: rl.Rectangle{X: x, Y: y, Width: float32(texture.Width), Height: float32(texture.Height)}, Weight: weight, LastCatchTime: startTimeNow}
+}
+
+type Scoreboard struct {
+	Name  string
+	Score int
+}
+
+func newScoreToBoard(name string, score int) *Scoreboard {
+	return &Scoreboard{Name: name, Score: score}
+}
+
+func CreateTable(db *sql.DB) (sql.Result, error) {
+	sqlCommand := `CREATE TABLE IF NOT EXISTS scores (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		score INTEGER NOT NULL);`
+	return db.Exec(sqlCommand)
+}
+
+func updateHighScore(db *sql.DB, yourGame GameState) ([]*Scoreboard, error) {
+	var results []*Scoreboard
+	//gonna add the current score into the data base
+	now := time.Now()
+	dateOfToday := now.Format("Monday, January 2, 2006")
+	_, err := db.Exec(`INSERT INTO scores (name, score) VALUES (?, ?)`, dateOfToday, yourGame.Score)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	rows, err := db.Query("SELECT name, score FROM scores ORDER BY score DESC LIMIT 3;")
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var score int
+		err := rows.Scan(&name, &score)
+		if err != nil {
+			log.Println("Error Scanning row: ", err)
+			continue
+		}
+		results = append(results, newScoreToBoard(name, score))
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+func displayHighScore(yourGame *GameState) {
+	if len(yourGame.HighScore) == 0 {
+		rl.DrawText("No high scores yet!", 190, 300, 20, rl.DarkGray)
+		return
+	}
+
+	if yourGame.Score > yourGame.HighScore[0].Score {
+		rl.DrawText("Wow! You made the high score!", 190, 250, 20, rl.DarkGray)
+		rl.DrawText(strconv.Itoa(yourGame.Score), 190, 300, 20, rl.DarkGray)
+	} else {
+		var y int32 = 300
+		for i, theScoreToDisplay := range yourGame.HighScore {
+			mssg := strconv.Itoa(theScoreToDisplay.Score) + "    " + theScoreToDisplay.Name
+			rl.DrawText(mssg, 190, y, 20, rl.DarkGray)
+			y = int32(i+1)*20 + 300
+		}
+	}
 }
 
 // function when "creating" new snacks
@@ -65,7 +151,7 @@ func howMuchTimeIsLeft(startTime time.Time, gameDuration time.Duration) string {
 	return strconv.Itoa(timeDisplay)
 }
 
-func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2D, score int, gameIsOver bool, startTime time.Time, gameDuration time.Duration, screenText string) (int, bool) {
+func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2D, startTime time.Time, gameDuration time.Duration, screenText string, crunchFx rl.Sound, yourGame *GameState) {
 	getInput(fox)
 	//this will act as gravity
 	fox.Y = fox.Y + 3.0
@@ -75,15 +161,16 @@ func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2
 	//game Logic
 	if timeIsUp(startTime, gameDuration) == true {
 		screenText = "Game over"
-		gameIsOver = true
+		yourGame.IsOver = true
 	} else {
 		//for first snack
 		if rl.CheckCollisionRecs(fox.Rectangle, snack.Rectangle) {
+			rl.PlaySound(crunchFx)
 			//checking to see if it is a cookie, then extra points
 			if snack.Texture == snackTextures[0] {
-				score = score + 3
+				yourGame.Score += 3
 			} else {
-				score++
+				yourGame.Score++
 			}
 			place(snack, &snackTextures)
 		}
@@ -93,10 +180,11 @@ func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2
 		rl.DrawTexture(snack.Texture, int32(snack.X), int32(snack.Y), rl.White)
 		//for second snack
 		if rl.CheckCollisionRecs(fox.Rectangle, snack2.Rectangle) {
+			rl.PlaySound(crunchFx)
 			if snack2.Texture == snackTextures[0] {
-				score = score + 3
+				yourGame.Score += 3
 			} else {
-				score++
+				yourGame.Score++
 			}
 			place(snack2, &snackTextures)
 		}
@@ -107,32 +195,17 @@ func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2
 	}
 
 	//On screen, draw text
-	rl.DrawText("Your score is "+strconv.Itoa(score), 20, 20, 18, rl.DarkGray)
-	if gameIsOver == false {
+	rl.DrawText("Your score is "+strconv.Itoa(yourGame.Score), 20, 20, 18, rl.DarkGray)
+	if yourGame.IsOver == false {
 		rl.DrawText(howMuchTimeIsLeft(startTime, gameDuration), 525, 20, 18, rl.DarkGray)
 	}
 	rl.DrawText(screenText, 20, 45, 18, rl.DarkGray)
-	return score, gameIsOver
 }
 
 func getInput(fox *Actor) {
-	if rl.IsKeyDown(rl.KeyRight) {
-		fox.X = fox.X + fox.Speed
-		fox.Flip = false
-	}
-	if rl.IsKeyDown(rl.KeyLeft) {
-		fox.X = fox.X - fox.Speed
-		fox.Flip = true
-	}
-	if rl.IsKeyDown(rl.KeyUp) {
-		if fox.Y > 600.0 {
-			fox.Y = fox.Y - fox.Speed
-		} else {
-			fox.Y = 600.0
-		}
-	}
 	//collisions with the window
 	fox.X = rl.Clamp(fox.X, 0.0, Size-fox.Width)
+	//Controls for the fox
 	if rl.IsKeyDown(rl.KeyRight) {
 		fox.X = fox.X + fox.Speed
 		fox.Flip = false
@@ -162,20 +235,6 @@ func getInput(fox *Actor) {
 		src.X = float32(fox.Texture.Width)
 	}
 	rl.DrawTexturePro(fox.Texture, src, dst, origin, 0, rl.White) //DrawTexturePro(texture Texture2D, sourceRec, destRec Rectangle, origin Vector2, rotation float32, tint color.RGBA)
-
-	fox.Y = rl.Clamp(fox.Y, 0.0, Size-fox.Height)
-	//flipping logic
-	src1 := rl.NewRectangle(0, 0, float32(fox.Texture.Width), float32(fox.Texture.Height))
-	dst1 := rl.NewRectangle(fox.X, fox.Y, float32(fox.Texture.Width), float32(fox.Texture.Height))
-	origin1 := rl.NewVector2(0, 0)
-	if fox.Flip {
-		// Flip horizontally by making source width negative
-		src1.Width = -src1.Width
-		// Shift the source rect start so it doesn't disappear
-		src1.X = float32(fox.Texture.Width)
-	}
-	rl.DrawTexturePro(fox.Texture, src1, dst1, origin1, 0, rl.White) //DrawTexturePro(texture Texture2D, sourceRec, destRec Rectangle, origin Vector2, rotation float32, tint color.RGBA)
-
 }
 
 func main() {
@@ -183,14 +242,27 @@ func main() {
 	rl.InitWindow(Size, Size, "Catch The Snack!")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
+	db, err := sql.Open("sqlite", "./score.db?_pragma=foreign_keys(1)")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer db.Close()
+	//create the table just in case
+	_, err = CreateTable(db)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	var startTime = time.Now()
 	var gameDuration = 60 * time.Second
 	screenText := "Welcome!"
-
+	rl.InitAudioDevice()
+	defer rl.CloseAudioDevice()
 	//game-play variables
-	score := 0
-	gameIsOver := false
-
+	//score := 0
+	//gameIsOver := false
+	yourGame := newGame()
 	//load Background
 	backgroundTexture := rl.LoadTexture("images/background.jpg")
 	defer rl.UnloadTexture(backgroundTexture)
@@ -211,22 +283,34 @@ func main() {
 	snackTextures[3] = rl.LoadTexture("images/pineapple.png")
 	defer rl.UnloadTexture(snackTextures[3])
 	snack := newObject(snackTextures[1], 200.0, 5.0, 1)
-	snack2 := newObject(snackTextures[3], 400.0, 5.0, 1)
+	snack2 := newObject(snackTextures[3], 400.0, 5.0, 3)
+
+	//load sound
+	crunchFx := rl.LoadSound("sounds/crunch.wav")
+	defer rl.UnloadSound(crunchFx)
 
 	for !rl.WindowShouldClose() {
 		// Drawing What should be on screen
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
 		rl.DrawTexture(backgroundTexture, 0, 0, rl.White)
-		if gameIsOver == false {
-			score, gameIsOver = playTheGame(fox, snack, snack2, snackTextures, score, gameIsOver, startTime, gameDuration, screenText)
-		} else if rl.IsKeyDown(rl.KeyY) && gameIsOver == true {
-			gameIsOver = false
+		if yourGame.IsOver == false {
+			playTheGame(fox, snack, snack2, snackTextures, startTime, gameDuration, screenText, crunchFx, yourGame)
+		} else if rl.IsKeyDown(rl.KeyY) && yourGame.IsOver == true {
+			yourGame = newGame()
 			startTime = time.Now()
-			score = 0
 		}
-		if gameIsOver == true {
-			rl.DrawText("Your score is "+strconv.Itoa(score), 100, 100, 24, rl.DarkGray)
+		if yourGame.IsOver {
+			if yourGame.ScoreRecorded == false {
+				var err error
+				yourGame.HighScore, err = updateHighScore(db, *yourGame)
+				if err != nil {
+					log.Println("Arrgh, the database was unreachable")
+				}
+				yourGame.ScoreRecorded = true
+			}
+			displayHighScore(yourGame)
+			rl.DrawText("Your score is "+strconv.Itoa(yourGame.Score), 100, 100, 24, rl.DarkGray)
 			rl.DrawText("Press Y to play again", 100, 200, 24, rl.DarkGray)
 			rl.DrawTexture(fox.Texture, int32(fox.X), int32(fox.Y), rl.White)
 		}
