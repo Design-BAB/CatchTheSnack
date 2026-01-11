@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	Size = 900
+	Size                = 900
+	gravity     float32 = 0.7
+	jumpImpulse float32 = 15.5
 )
 
 type GameState struct {
@@ -40,6 +42,8 @@ type Actor struct {
 	rl.Rectangle // This gives Actor all the fields of rl.Rectangle (X, Y, Width, Height)
 	Flip         bool
 	Speed        float32
+	VelY         float32
+	OnGround     bool
 }
 
 func newActor(texture rl.Texture2D, x, y float32) *Actor {
@@ -153,8 +157,7 @@ func howMuchTimeIsLeft(startTime time.Time, gameDuration time.Duration) string {
 
 func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2D, startTime time.Time, gameDuration time.Duration, screenText string, crunchFx rl.Sound, yourGame *GameState) {
 	getInput(fox)
-	//this will act as gravity
-	fox.Y = fox.Y + 3.0
+	updateFoxPhysics(fox)
 	snack.Y = snack.Y + 6.0 + float32(snack.Weight)
 	snack2.Y = snack2.Y + 6.0 + float32(snack2.Weight)
 
@@ -200,6 +203,7 @@ func playTheGame(fox *Actor, snack, snack2 *Object, snackTextures [4]rl.Texture2
 		rl.DrawText(howMuchTimeIsLeft(startTime, gameDuration), 525, 20, 18, rl.DarkGray)
 	}
 	rl.DrawText(screenText, 20, 45, 18, rl.DarkGray)
+	drawFox(fox)
 }
 
 func getInput(fox *Actor) {
@@ -214,17 +218,29 @@ func getInput(fox *Actor) {
 		fox.X = fox.X - fox.Speed
 		fox.Flip = true
 	}
-	if rl.IsKeyDown(rl.KeyUp) {
-		if fox.Y > 600.0 {
-			fox.Y = fox.Y - fox.Speed
-		} else {
-			fox.Y = 600.0
-		}
+	if (rl.IsKeyPressed(rl.KeyUp) || rl.IsKeyPressed(rl.KeySpace)) && fox.OnGround {
+		fox.VelY = -jumpImpulse
+		fox.OnGround = false
 	}
 	//collisions with the window
 	fox.X = rl.Clamp(fox.X, 0.0, Size-fox.Width)
-	fox.Y = rl.Clamp(fox.Y, 0.0, Size-fox.Height)
-	//flipping logic
+}
+
+func updateFoxPhysics(fox *Actor) {
+	fox.VelY += gravity
+	fox.Y += fox.VelY
+	groundY := float32(Size) - fox.Height
+	if fox.Y >= groundY {
+		fox.Y = groundY
+		fox.VelY = 0
+		fox.OnGround = true
+	} else {
+		fox.OnGround = false
+	}
+	fox.Y = rl.Clamp(fox.Y, 0.0, groundY)
+}
+
+func drawFox(fox *Actor) {
 	src := rl.NewRectangle(0, 0, float32(fox.Texture.Width), float32(fox.Texture.Height))
 	dst := rl.NewRectangle(fox.X, fox.Y, float32(fox.Texture.Width), float32(fox.Texture.Height))
 	origin := rl.NewVector2(0, 0)
@@ -234,7 +250,7 @@ func getInput(fox *Actor) {
 		// Shift the source rect start so it doesn't disappear
 		src.X = float32(fox.Texture.Width)
 	}
-	rl.DrawTexturePro(fox.Texture, src, dst, origin, 0, rl.White) //DrawTexturePro(texture Texture2D, sourceRec, destRec Rectangle, origin Vector2, rotation float32, tint color.RGBA)
+	rl.DrawTexturePro(fox.Texture, src, dst, origin, 0, rl.White)
 }
 
 func main() {
@@ -312,7 +328,7 @@ func main() {
 			displayHighScore(yourGame)
 			rl.DrawText("Your score is "+strconv.Itoa(yourGame.Score), 100, 100, 24, rl.DarkGray)
 			rl.DrawText("Press Y to play again", 100, 200, 24, rl.DarkGray)
-			rl.DrawTexture(fox.Texture, int32(fox.X), int32(fox.Y), rl.White)
+			drawFox(fox)
 		}
 		rl.EndDrawing()
 	}
